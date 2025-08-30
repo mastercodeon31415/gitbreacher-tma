@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitBreacher Scanner</title>
+    <link rel="stylesheet" href="telekit/telekit.css">
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+    <div id="app"></div>
+
+    <!-- TeleKit Framework -->
+    <script src="telekit/telekit.js"></script>
+    <script src="telekit/components.js"></script>
+
+    <!-- App Pages -->
+    <script src="pages/home.js"></script>
+    <script src="pages/scanLog.js"></script>
+
+    <!-- SignalR Client Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
+
+    <!-- App Initialization -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+
+            // ==========================================================
+            // == IMPORTANT: REPLACE WITH YOUR LIVE RAILWAY SERVER URL ==
+            // ==========================================================
+            const API_BASE_URL = 'https://awstool-production.up.railway.app'; // Use your actual Railway URL
+            // ==========================================================
+
+            const TK = new TeleKit({
+                navStyle: 'none',
+                apiBaseUrl: API_BASE_URL,
+                state: {
+                    scanSettings: {
+                        provider: 'aws.json',
+                        numRanges: 5,
+                        poolSize: 2,
+                        useCustomPaths: true
+                    },
+                    scanStatus: {
+                        isRunning: false,
+                        statistics: { checkedCount: 0, totalTargets: 0, confirmedCount: 0, timeoutCount: 0, cpm: 0, formattedElapsedTime: '00:00:00' }
+                    },
+                    scanLog: []
+                }
+            });
+
+            window.TK = TK;
+            registerTeleKitComponents(TK);
+
+            TK.addPage('home', HomePage);
+            TK.addPage('scanLog', ScanLogPage);
+
+            TK.navigateTo('home');
+
+            // --- THIS IS THE NEW, CORRECTED BATCHING LOGIC ---
+
+            // 1. Create a buffer to hold incoming log messages.
+            let logBuffer = [];
+
+            // 2. Create a rendering loop that calls setState in batches.
+            setInterval(() => {
+                // If there's nothing in the buffer, do nothing.
+                if (logBuffer.length === 0) return;
+
+                // Take all items currently in the buffer.
+                const newEntries = logBuffer.splice(0, logBuffer.length);
+                
+                // Get the current log state.
+                const currentLogs = TK.state.scanLog;
+                
+                // Combine and trim the logs to prevent memory issues.
+                const updatedLogs = [...currentLogs, ...newEntries].slice(-500);
+
+                // Call setState ONCE with the new, complete log array.
+                // This will trigger a single, efficient re-render.
+                TK.setState({ scanLog: updatedLogs });
+
+            }, 250); // Update the state every 250ms.
+
+            const connection = new signalR.HubConnectionBuilder()
+                .withUrl(API_BASE_URL + "/scanhub")
+                .withAutomaticReconnect()
+                .build();
+
+            // 3. The SignalR handler is now extremely fast. It only pushes to a simple array.
+            connection.on("ReceiveLogMessage", (message, color) => {
+                logBuffer.push({ message, color: color.toLowerCase() });
+            });
+
+            // The statistics handler is fine, as it's a low-frequency update that correctly uses setState.
+            connection.on("UpdateStatistics", (stats) => {
+                TK.setState({ scanStatus: { ...TK.state.scanStatus, statistics: stats } });
+            });
+
+            async function startSignalR() {
+                try {
+                    await connection.start();
+                    console.log("SignalR Connected.");
+                } catch (err) {
+                    console.error("SignalR Connection Failed: ", err);
+                    setTimeout(startSignalR, 5000);
+                }
+            }
+            startSignalR();
+
+            // The status polling logic remains unchanged.
+            setInterval(async () => {
+                try {
+                    const response = await fetch(API_BASE_URL + '/api/Scan/status');
+                    if (response.ok) {
+                        const status = await response.json();
+                        TK.setState({ scanStatus: status });
+                         if (!status.isRunning && TK.state.scanLog.length > 0) {
+                            if (!TK.state.scanLog[TK.state.scanLog.length-1].message.includes('SCAN COMPLETE')) {
+                                TK.setState({ scanLog: [...TK.state.scanLog, { message: 'SCAN COMPLETE.', color: 'Green'}]});
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error("Status poll failed:", e);
+                }
+            }, 5000);
+        });
+    </script>
+</body>
+</html>
