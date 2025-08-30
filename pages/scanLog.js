@@ -1,3 +1,5 @@
+// pages/scanLog.js
+
 class ScanLogPage extends TeleKitPage {
     render() {
         const header = this._c('TK_Header', { title: "Live Scan Log" });
@@ -8,8 +10,6 @@ class ScanLogPage extends TeleKitPage {
             content: cardContent
         });
 
-        // --- CHANGE 2: The render method now correctly builds the HTML from the state. ---
-        // This is the "single source of truth" and eliminates flickering.
         const logEntriesHtml = TK.state.scanLog.map(entry =>
             `<li style="color: ${entry.color};">${entry.message}</li>`
         ).join('');
@@ -18,7 +18,7 @@ class ScanLogPage extends TeleKitPage {
             <div>
                 ${header}
                 <div class="tk-card">
-                    <ul id="log-list" class="tk-list" style="font-family: 'Consolas', monospace; font-size: 12px; max-height: 50vh; overflow-y: auto;">
+                    <ul id="log-list" class="tk-list" style="font-family: 'Consolas', monospace; font-size: 12px; max-height: 40vh; overflow-y: auto;">
                         ${logEntriesHtml}
                     </ul>
                 </div>
@@ -38,8 +38,6 @@ class ScanLogPage extends TeleKitPage {
         this.tk.backButton.hide();
     }
 
-    // --- CHANGE 3: The reliable scrolling logic is restored here. ---
-    // It runs after the framework has finished its efficient, batched re-render.
     onRenderComplete() {
         const logList = document.getElementById('log-list');
         if (logList) {
